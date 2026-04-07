@@ -40,7 +40,9 @@ async function sendEmail(
   });
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[subscriptionEmails] Resend ${res.status}: ${body}`);
+    const msg = `[subscriptionEmails] Resend ${res.status}: ${body}`;
+    console.error(msg);
+    throw new Error(msg);
   }
 }
 
