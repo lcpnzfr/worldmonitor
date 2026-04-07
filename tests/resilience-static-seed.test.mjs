@@ -317,6 +317,7 @@ describe('resilience static seed payload assembly', () => {
       tradeToGdp: new Map([
         ['NO', { source: 'worldbank', tradeToGdpPct: 70.5, year: 2023 }],
       ]),
+      appliedTariffRate: new Map(),
     }, 2026, '2026-04-03T12:00:00.000Z');
 
     assert.deepEqual([...payloads.keys()].sort(), ['NO', 'US', 'YE']);
@@ -331,7 +332,8 @@ describe('resilience static seed payload assembly', () => {
       aquastat: null,
       iea: { source: 'eurostat-nrg_ind_id', energyImportDependency: { value: -13.3, year: 2024, source: 'eurostat' } },
       tradeToGdp: { source: 'worldbank', tradeToGdpPct: 70.5, year: 2023 },
-      coverage: { availableDatasets: 4, totalDatasets: 9, ratio: 0.444 },
+      appliedTariffRate: null,
+      coverage: { availableDatasets: 4, totalDatasets: 10, ratio: 0.4 },
       seedYear: 2026,
       seededAt: '2026-04-03T12:00:00.000Z',
     });
