@@ -29,7 +29,7 @@ export const RESILIENCE_STATIC_INDEX_KEY = 'resilience:static:index:v1';
 export const RESILIENCE_STATIC_META_KEY = 'seed-meta:resilience:static';
 export const RESILIENCE_STATIC_PREFIX = 'resilience:static:';
 export const RESILIENCE_STATIC_TTL_SECONDS = 400 * 24 * 60 * 60;
-export const RESILIENCE_STATIC_SOURCE_VERSION = 'resilience-static-v2';
+export const RESILIENCE_STATIC_SOURCE_VERSION = 'resilience-static-v3';
 export const RESILIENCE_STATIC_WINDOW_CRON = '0 */4 1-3 10 *';
 
 const LOCK_DOMAIN = 'resilience:static';
@@ -43,6 +43,8 @@ const WHO_INDICATORS = {
   uhcIndex: 'UHC_INDEX_REPORTED',
   // WHS4_100 from the issue body no longer resolves; WHO currently exposes MCV1 coverage on WHS8_110.
   measlesCoverage: process.env.RESILIENCE_WHO_MEASLES_INDICATOR || 'WHS8_110',
+  physiciansPer10k: 'HWF_0001',
+  healthExpPerCapitaPpp: 'GHED_CHE_pc_PPP_SHA2011',
 };
 const WORLD_BANK_BASE = 'https://api.worldbank.org/v2';
 const WHO_BASE = 'https://ghoapi.azureedge.net/api';
@@ -326,6 +328,18 @@ export async function fetchWhoDataset() {
 
   if (successfulIndicators === 0) {
     throw new Error('WHO: all indicator fetches failed');
+  }
+
+  for (const [, record] of merged) {
+    const per10k = record.indicators.physiciansPer10k;
+    if (per10k && per10k.value != null) {
+      record.indicators.physiciansPer1k = {
+        indicator: per10k.indicator,
+        value: roundMetric(per10k.value / 10),
+        year: per10k.year,
+      };
+    }
+    delete record.indicators.physiciansPer10k;
   }
 
   return merged;
