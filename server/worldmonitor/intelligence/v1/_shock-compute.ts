@@ -46,6 +46,20 @@ export function computeEffectiveCoverDays(
   return daysOfCover;
 }
 
+export function deriveCoverageLevel(jodiOil: boolean, comtrade: boolean): 'full' | 'partial' | 'unsupported' {
+  if (!jodiOil) return 'unsupported';
+  if (!comtrade) return 'partial';
+  return 'full';
+}
+
+export function deriveChokepointConfidence(
+  liveFlowRatio: number | null,
+  degraded: boolean,
+): 'high' | 'low' | 'none' {
+  if (degraded || liveFlowRatio === null) return 'none';
+  return 'high';
+}
+
 export function buildAssessment(
   code: string,
   chokepointId: string,
@@ -55,8 +69,10 @@ export function buildAssessment(
   daysOfCover: number,
   disruptionPct: number,
   products: Array<{ product: string; deficitPct: number }>,
+  coverageLevel?: 'full' | 'partial' | 'unsupported',
+  degraded?: boolean,
 ): string {
-  if (!dataAvailable) {
+  if (coverageLevel === 'unsupported' || !dataAvailable) {
     return `Insufficient import data for ${code} to model ${chokepointId} exposure.`;
   }
   if (effectiveCoverDays === -1) {
@@ -65,11 +81,15 @@ export function buildAssessment(
   if (gulfCrudeShare < 0.1) {
     return `${code} has low Gulf crude dependence (${Math.round(gulfCrudeShare * 100)}%); ${chokepointId} disruption has limited direct impact.`;
   }
+  const degradedNote = degraded ? ' (live flow data unavailable, using historical baseline)' : '';
   if (effectiveCoverDays > 90) {
-    return `With ${daysOfCover} days IEA cover, ${code} can bridge a ${disruptionPct}% ${chokepointId} disruption for ~${effectiveCoverDays} days.`;
+    return `With ${daysOfCover} days IEA cover, ${code} can bridge a ${disruptionPct}% ${chokepointId} disruption for ~${effectiveCoverDays} days${degradedNote}.`;
   }
   const dieselDeficit = products.find((p) => p.product === 'Diesel')?.deficitPct ?? 0;
   const jetDeficit = products.find((p) => p.product === 'Jet fuel')?.deficitPct ?? 0;
   const worstDeficit = Math.max(dieselDeficit, jetDeficit);
-  return `${code} faces ${worstDeficit.toFixed(1)}% diesel/jet deficit under ${disruptionPct}% ${chokepointId} disruption; IEA cover: ${daysOfCover} days.`;
+  if (coverageLevel === 'partial') {
+    return `${code} faces ${worstDeficit.toFixed(1)}% diesel/jet deficit under ${disruptionPct}% ${chokepointId} disruption; IEA cover: ${daysOfCover} days. Gulf share proxied at 40%${degradedNote}.`;
+  }
+  return `${code} faces ${worstDeficit.toFixed(1)}% diesel/jet deficit under ${disruptionPct}% ${chokepointId} disruption; IEA cover: ${daysOfCover} days${degradedNote}.`;
 }

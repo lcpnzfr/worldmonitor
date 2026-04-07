@@ -13,19 +13,21 @@ import {
   computeGulfShare,
   computeEffectiveCoverDays,
   buildAssessment,
+  deriveCoverageLevel,
+  deriveChokepointConfidence,
 } from './_shock-compute';
+import { ISO2_TO_COMTRADE } from './_comtrade-reporters';
 
 const SHOCK_CACHE_TTL = 3600;
 
-// ISO2 → Comtrade numeric reporter code (only 6 seeded reporters)
-const ISO2_TO_COMTRADE: Record<string, string> = {
-  US: '842',
-  CN: '156',
-  RU: '643',
-  IR: '364',
-  IN: '356',
-  TW: '158',
+const CP_TO_PORTWATCH: Record<string, string> = {
+  hormuz: 'hormuz_strait',
+  babelm: 'bab_el_mandeb',
+  suez: 'suez',
+  malacca: 'malacca_strait',
 };
+
+const PROXIED_GULF_SHARE = 0.40;
 
 interface JodiProduct {
   demandKbd?: number | null;
@@ -60,6 +62,22 @@ interface ComtradeFlowRecord {
 interface ComtradeFlowsResult {
   flows?: ComtradeFlowRecord[];
   fetchedAt?: string;
+}
+
+interface ChokepointEntry {
+  id: string;
+  name: string;
+  baselineMbd?: number;
+  currentMbd?: number;
+  flowRatio: number;
+  confidence: string;
+  disrupted?: boolean;
+  source?: string;
+}
+
+interface ChokepointFlowsResult {
+  updatedAt?: string;
+  chokepoints?: ChokepointEntry[];
 }
 
 function n(v: number | null | undefined): number {
@@ -102,6 +120,15 @@ export async function computeEnergyShockScenario(
     effectiveCoverDays: 0,
     assessment: `Insufficient data to compute shock scenario for ${code}.`,
     dataAvailable: false,
+    jodiOilCoverage: false,
+    comtradeCoverage: false,
+    ieaStocksCoverage: false,
+    portwatchCoverage: false,
+    coverageLevel: 'unsupported',
+    limitations: [],
+    degraded: false,
+    chokepointConfidence: 'none',
+    liveFlowRatio: 0,
   };
 
   if (!code || code.length !== 2) return EMPTY;
@@ -116,10 +143,11 @@ export async function computeEnergyShockScenario(
   const cached = await getCachedJson(cacheKey);
   if (cached) return cached as ComputeEnergyShockScenarioResponse;
 
-  const [jodiOilResult, ieaStocksResult, gulfShareResult] = await Promise.allSettled([
+  const [jodiOilResult, ieaStocksResult, gulfShareResult, chokepointFlowsRaw] = await Promise.allSettled([
     getCachedJson(`energy:jodi-oil:v1:${code}`, true),
     getCachedJson(`energy:iea-oil-stocks:v1:${code}`, true),
     getGulfCrudeShare(code),
+    getCachedJson('energy:chokepoint-flows:v1', true),
   ]);
 
   const jodiOil = jodiOilResult.status === 'fulfilled' ? (jodiOilResult.value as JodiOil | null) : null;
@@ -128,8 +156,43 @@ export async function computeEnergyShockScenario(
     ? gulfShareResult.value
     : { share: 0, hasData: false };
 
-  const exposureMult = CHOKEPOINT_EXPOSURE[chokepointId] ?? 1.0;
-  const gulfCrudeShare = rawGulfShare * exposureMult;
+  const chokepointFlowsRaw2 = chokepointFlowsRaw.status === 'fulfilled'
+    ? (chokepointFlowsRaw.value as ChokepointFlowsResult | null)
+    : null;
+
+  const portWatchKey = CP_TO_PORTWATCH[chokepointId];
+  const cpEntry = chokepointFlowsRaw2?.chokepoints?.find((c) => c.id === chokepointId || c.id === portWatchKey) ?? null;
+
+  const degraded = !chokepointFlowsRaw2 ||
+    !chokepointFlowsRaw2.chokepoints ||
+    chokepointFlowsRaw2.chokepoints.length === 0 ||
+    (cpEntry?.source === 'unavailable') ||
+    (cpEntry?.confidence === 'none');
+
+  const liveFlowRatio: number | null = (!degraded && cpEntry != null && typeof cpEntry.flowRatio === 'number')
+    ? cpEntry.flowRatio
+    : null;
+
+  const exposureMult = liveFlowRatio !== null ? liveFlowRatio : (CHOKEPOINT_EXPOSURE[chokepointId] ?? 1.0);
+
+  const jodiOilCoverage = jodiOil != null;
+  const comtradeCoverage = comtradeHasData;
+  const ieaStocksCoverage = ieaStocks != null && ieaStocks.anomaly !== true;
+  const portwatchCoverage = liveFlowRatio !== null;
+
+  const coverageLevel = deriveCoverageLevel(jodiOilCoverage, comtradeCoverage);
+
+  const limitations: string[] = [];
+  if (coverageLevel === 'partial') {
+    limitations.push('Gulf crude share proxied at 40% (no Comtrade data)');
+  }
+  limitations.push('refinery yield: 80% crude-to-product heuristic');
+  if (degraded) {
+    limitations.push('PortWatch flow data unavailable, using historical baseline multipliers');
+  }
+
+  const effectiveGulfShare = coverageLevel === 'partial' ? PROXIED_GULF_SHARE : rawGulfShare;
+  const gulfCrudeShare = effectiveGulfShare * exposureMult;
 
   const crudeImportsKbd = n(jodiOil?.crude?.importsKbd);
   const crudeLossKbd = crudeImportsKbd * gulfCrudeShare * (disruptionPct / 100);
@@ -160,7 +223,9 @@ export async function computeEnergyShockScenario(
   const netExporter = ieaStocks?.netExporter === true;
   const effectiveCoverDays = computeEffectiveCoverDays(daysOfCover, netExporter, crudeLossKbd, crudeImportsKbd);
 
-  const dataAvailable = jodiOil != null && comtradeHasData;
+  const dataAvailable = jodiOilCoverage;
+
+  const chokepointConfidence = deriveChokepointConfidence(liveFlowRatio, degraded);
 
   const assessment = buildAssessment(
     code,
@@ -171,6 +236,8 @@ export async function computeEnergyShockScenario(
     daysOfCover,
     disruptionPct,
     products,
+    coverageLevel,
+    degraded,
   );
 
   const response: ComputeEnergyShockScenarioResponse = {
@@ -183,6 +250,15 @@ export async function computeEnergyShockScenario(
     effectiveCoverDays,
     assessment,
     dataAvailable,
+    jodiOilCoverage,
+    comtradeCoverage,
+    ieaStocksCoverage,
+    portwatchCoverage,
+    coverageLevel,
+    limitations,
+    degraded,
+    chokepointConfidence,
+    liveFlowRatio: liveFlowRatio !== null ? Math.round(liveFlowRatio * 1000) / 1000 : 0,
   };
 
   await setCachedJson(cacheKey, response, SHOCK_CACHE_TTL);
