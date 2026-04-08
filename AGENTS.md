@@ -1,6 +1,21 @@
-# AGENTS.md
+# AGENTS.md — WorldMonitor
 
-Agent entry point for WorldMonitor. Read this first, then follow links for depth.
+## ⚠️ Note: Reference Repository for Forex System Workspace
+
+This repo (`lcpnzfr/worldmonitor`) is a fork of the repo `koala73/worldmonitor`, forked into the `lcpnzfr` GitHub account and locally cloned at `C:\Projects\forex_system\worldmonitor` inside the `forex_system` polyrepo workspace structure.
+
+It serves as a **reference and context resource only**. It is **NOT part of the forex_system trading solution**. It is included to:
+- Provide architectural patterns for data aggregation from multiple sources
+- Demonstrate API endpoint design and caching strategies
+- Guide design decisions when building similar features in forex_system
+
+Forex_system prompts can reference WorldMonitor for context: "How does worldmonitor collect feeds?" → refers to patterns in this repo.
+
+---
+
+## Agent entry point for WorldMonitor
+
+Read this first, then follow links for depth.
 
 ## What This Project Is
 
