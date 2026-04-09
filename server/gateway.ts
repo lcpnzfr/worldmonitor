@@ -11,7 +11,6 @@
 
 import { createRouter, type RouteDescriptor } from './router';
 import { getCorsHeaders, isDisallowedOrigin, isAllowedOrigin } from './cors';
-// @ts-expect-error — JS module, no declaration file
 import { validateApiKey } from '../api/_api-key.js';
 import { mapErrorToResponse } from './error-mapper';
 import { checkRateLimit, checkEndpointRateLimit, hasEndpointRatePolicy } from './_shared/rate-limit';
@@ -219,6 +218,13 @@ const RPC_CACHE_TIER: Record<string, CacheTier> = {
   '/api/resilience/v1/get-resilience-ranking': 'slow',
 };
 
+type EnvLike = Record<string, string | undefined>;
+const processEnv: EnvLike | undefined = (
+  globalThis as typeof globalThis & {
+    process?: { env?: EnvLike };
+  }
+).process?.env;
+
 import { PREMIUM_RPC_PATHS } from '../src/shared/premium-paths';
 
 /**
@@ -423,7 +429,7 @@ export function createDomainGateway(
         mergedHeaders.set('X-Cache-Tier', 'no-store');
       } else {
         const rpcName = pathname.split('/').pop() ?? '';
-        const envOverride = process.env[`CACHE_TIER_OVERRIDE_${rpcName.replace(/-/g, '_').toUpperCase()}`] as CacheTier | undefined;
+        const envOverride = processEnv?.[`CACHE_TIER_OVERRIDE_${rpcName.replace(/-/g, '_').toUpperCase()}`] as CacheTier | undefined;
         const tier = (envOverride && envOverride in TIER_HEADERS ? envOverride : null) ?? RPC_CACHE_TIER[pathname] ?? 'medium';
         mergedHeaders.set('Cache-Control', TIER_HEADERS[tier]);
         // Only allow Vercel CDN caching for trusted origins (worldmonitor.app, Vercel previews,
